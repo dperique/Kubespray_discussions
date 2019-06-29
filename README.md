@@ -97,3 +97,79 @@ There are two ways to do this:
   time or use ansible-playbook with the `--limit` option.
 
 ## Upgrading Docker
+
+Upgrading docker involves some drama because pods need to be restarted.  If you have
+a service with certain availability characteristics, be mindful of this when upgrading
+docker.  For example, ensure you have enough pod replicas in place so that worker
+nodes getting a docker upgrade do not degrade your service in a noticable way.
+
+In our case, we do this to upgrade docker:
+
+* Modify the your kubespray related yamls and add `docker_version: '18.06'` for the
+  case of docker 18.06.
+* Possibly modify the ansible to point to a different docker repo if that version
+  of docker is not available in the repo specified in kubespray.
+* Create a version of cluster.yml that runs one node at a time or N nodes at a time
+  so that your service has enough pod replicas to maintain service through a docker
+  upgrade
+* Run your version of cluster.yml that uses the upgrade docker version.
+
+## Looking at kube apiserver load balancing on k8s
+
+When you create a highly available k8s cluster using kubespray, you will need more
+than one master.  But since the workers still need to talk to a master, you have to
+put something in between the worker and the masters so that worker nodes can talk to
+the masters in a load balanced way.  Kubespray does this via "localhost loadbalancing".
+See the kubespray/docs/ha_mode.md document for more information.
+
+Under the hood, we see that kubespray creates one "static pod" per worker k8s node
+called `nginx-proxy-(nodeName)` in the kube-system namespace.  For example, if one of your
+worker nodes is called kube-test-node-4, the pod will be named nginx-proxy-kube-test-node-4.
+That nginx static pod uses a file called `/etc/nginx/nginx.conf` on the host; this is
+a file mounted on the static pod using the hostPath method.  The static pod is created
+as part of kubespray and the config file is create at
+`kubespray/roles/kubernetes/node/tasks/nginx-proxy.yml`
+
+The worker nodes talk to the apiserver via 127.0.0.1:6443.  The nginx pod forwards
+the traffic to one of the masters in a load balanced way.
+
+If you tweak that file, kill the right docker container to get the pod to restart and
+re-read the file.
+You can kill/start that pod by renaming the pod manifest in `/etc/kubernetes/manifests` to
+something that begins with a dot, waiting for the static pod to terminate, and then
+renaming it back.  This is the standard "static pod" behavior as described in the
+Kubernetes docs.  You can also kill the docker container for that pod residing on the
+Kubernetes host where that pod is running.  Do something like `docker ps |grep nginx-proxy`
+to find it and then do a `docker rm ...` on the id of the one that doesn't have the
+string "POD" in it.
+
+The `/etc/nginx/nginx.conf` looks something like this (see my comments after the `<--`):
+
+```
+root@kube-test-k8s-node-4:/etc/nginx# cat nginx.conf
+error_log stderr notice;
+
+worker_processes auto;
+events {
+  multi_accept on;
+  use epoll;
+  worker_connections 1024;
+}
+
+stream {
+        upstream kube_apiserver {
+            least_conn;
+            server 192.168.236.159:6443; <-- master1
+            server 192.168.236.197:6443; <-- master2
+            server 192.168.237.45:6443;  <-- master3
+                    }
+
+        server {
+            listen        127.0.0.1:6443; <-- worker node sends apiserver traffic here
+            proxy_pass    kube_apiserver;
+            proxy_timeout 10m;
+            proxy_connect_timeout 1s;
+
+        }
+}
+```
