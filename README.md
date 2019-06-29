@@ -63,10 +63,10 @@ software that runs on top of Kubernetes.
 
 ## Building your k8s cluster
 
-For now, I'm going to just say that for the most part, Kubernetes works well for
+For now, I'm going to just say that for the most part, Kubespray works well for
 our use-case.  The biggest problem we may have on the initial installation is
-going to be missed preparation steps (e.g., forgot to disable swap or forgot to
-add correct ssh public keys).
+going to be missed preparation steps (e.g., forgot to disable swap, forgot to
+add correct ssh public keys, etc.).
 
 We run the `cluster.yml` playbook.
 
