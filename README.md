@@ -6,7 +6,7 @@ with it.  We have many test/staging k8s clusters as well as about 20 production
 k8s clusters.  This document talks about various things I've observed in hopes of
 helping others understand kubespray from a user perspective including:
 
-* understand what kubespray does
+* understanding what kubespray does
 * experiences operating k8s clusters after they are created by kubespray
 
 The first one is about analyzing pieces of what kubespray does and what
@@ -27,9 +27,97 @@ In short, this document is about the "day 2" things or "day N" things.  I hope
 people find it helpful and if things are wrong, could be better, or augmented, PRs
 are always welcome.
 
+# Kubespray Preparation
+
+This is what we do to prepare for using kubespray.
+
+We installed Kubernetes using kubespray v2.4.0 (we eventually upgraded to kubespray v2.7.0).
+These days, there are more recent versions of kubespray.  If you start out using kubespray,
+get the latest stable version (which is usually the master branch minus one release).
+
+These are the steps we followed after we get baremetal servers from a DC using ubuntu 16.04
+minimal.  Use the latest supported OS for kubespray.
+
+* Provision the baremetal servers using ubuntu minimal
+* Optional but helps a lot
+  * Put your hosts/IPs in /etc/hosts
+  * Add your ssh key in a sudo account on your hosts
+  * Use a standard ansible inventory
+  * Use a standard set of kubespray ansible variables and settings
+
+## On Each Baremetal Host
+
+* See how much CPU RAM; I like to use at least 4 CPUs and 8G of RAM
+
+  ```
+  lscpu
+  free -g RAM
+  ```
+
+* In some DCs, the routes are wrong so remove what's there and add the correct route.
+
+  ```
+  route add default gw (the correct gw)
+  route del default gw (the configured gw)
+  ```
+
+* Ensure you have a working DNS server; tweak `/etc/resolv/conf` as needed, for
+  example, use 8.8.8.8.
+
+* Ping to confirm Internet connectivity
+  ```
+  ping 8.8.8.8
+  ping www.intel.com
+  ```
+
+* Make the routes permanent once you verified they are correct.
+  ```
+  vi /etc/network/interfaces
+    change the wrong gateway to the right gateway
+  ```
+
+* Turn swapping off (you may need to tweak systemd too)
+  ```
+  sudo swapoff -a
+  sudo vi /etc/fstab <remove swap mount line>
+  ```
+
+* Add ubuntu user and ssh key for ansible usage, setup sudo access
+  ```
+  adduser ubuntu
+  usermod -aG sudo ubuntu
+  add key to /home/ubuntu/.ssh/authorized_keys
+  echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+  # confirm you can login as ubuntu and can become root
+  su - ubuntu
+  sudo whoami
+  ```
+
+* Install python and some common troubleshooting tools on each host
+  ```
+  apt-add-repository ppa:ansible/ansible ; apt-get update ; apt-get install -y ansible
+  apt-get install python
+  apt install -y vim tcpdump
+  ```
+
+* Customize your docker subnet to avoid subnet collisions
+  ```
+  sudo mkdir -p /etc/docker
+  cat << END > /etc/docker/daemon.json
+  {
+    "bip": "192.168.0.1/16"
+  }
+  END
+  ```
+
+* Check connectivity
+  * Make sure every BM host can reach every other BM host
+  * Make sure you can ssh to every BM host from the machine you will use to run
+    kubespray
+
 ## Our kubespray use-case
 
-In my case, we build k8s clusters something like this:
+In our case, we build k8s clusters something like this:
 
 * Get some BM machines, put Ubuntu 16.04 minimal on them, apply updates, etc.
 * Network the machines so they are all on the same subnet
